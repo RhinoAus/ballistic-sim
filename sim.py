@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import mplcursors
+import os
+import csv
 
 
 class Sim:
@@ -117,7 +119,6 @@ class Sim:
         self.run()
         v_measured = np.interp(x, self.x, self.v)
         self.v0 *= v / v_measured
-        print(f'New v0: {self.v0}')
 
     def save_to_file(self, filename):
         """
@@ -126,13 +127,14 @@ class Sim:
         :param filename: Name of the file to save the data
         """
         np.savetxt(filename, np.c_[self.time, self.x, self.y, self.vx, self.vy, self.ax, self.ay])
-        print("Data saved to " + filename)
 
 
 class App:
     def __init__(self, root):
         self.root = root
         self.root.title("Nerf Dart Ballistics Simulator")
+        self.root.rowconfigure(0, weight=1)
+        self.root.columnconfigure(0, weight=1)
 
         # Initialize misc variables
         self.simulations = []
@@ -142,6 +144,8 @@ class App:
         # Create tabs
         notebook = ttk.Notebook(root)
         notebook.pack(expand=True, fill='both')
+        notebook.rowconfigure(0, weight=1)
+        notebook.columnconfigure(0, weight=1)
 
         # Tab 1: Run Simulations
         tab1 = ttk.Frame(notebook)
@@ -159,24 +163,48 @@ class App:
         tk.Button(tab1, text="Save Results", command=self.save_results).grid(row=self.fields, column=0, columnspan=2)
         self.fields += 1
 
-        # Tab 2: Visualize Results
-        self.tab2 = ttk.Frame(notebook)
-        notebook.add(self.tab2, text='Visualize Results')
-
-        self.sim_select_frame = ttk.LabelFrame(self.tab2, text="Select Simulations")
-        self.sim_select_frame.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
-
-        self.create_plot_area(self.tab2)
-        self.create_plot_options(self.tab2)
-
-        self.root.rowconfigure(0, weight=1)
-        self.root.columnconfigure(0, weight=1)
-        notebook.rowconfigure(0, weight=1)
-        notebook.columnconfigure(0, weight=1)
         tab1.rowconfigure(self.fields + 1, weight=1)
         tab1.columnconfigure(1, weight=1)
-        self.tab2.rowconfigure(0, weight=1)
-        self.tab2.columnconfigure(1, weight=1)
+
+        # Tab 2: Visualize Results
+        tab2 = ttk.Frame(notebook)
+        notebook.add(tab2, text='Visualize Results')
+
+        self.sim_select_frame = ttk.LabelFrame(tab2, text="Select Simulations")
+        self.sim_select_frame.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
+
+        self.create_plot_area(tab2)
+        self.create_plot_options(tab2)
+
+        tab2.rowconfigure(0, weight=1)
+        tab2.columnconfigure(1, weight=1)
+
+        # Tab 3: Back-calculate Cd
+        tab3 = ttk.Frame(notebook)
+        notebook.add(tab3, text='Back-calculate Cd')
+        self.fields = 0
+        self.mass_g_entry_2 = self.create_input_field(tab3, "Mass (g):", 1.0)
+        self.fps_1_entry = self.create_input_field(tab3, "First Velocity (ft/s):", 300)
+        self.dist_1_entry = self.create_input_field(tab3, "First Range (m):", 0)
+        self.fps_2_entry = self.create_input_field(tab3, "Second Velocity (ft/s):", 240)
+        self.dist_2_entry = self.create_input_field(tab3, "Second Range (m):", 10)
+        self.cd_output = self.create_input_field(tab3, "Cd:", '')
+        tk.Button(tab3, text="Calculate Cd", command=self.calculate_cd).grid(row=self.fields, column=0, columnspan=2)
+        self.fields += 1
+
+        tk.Label(tab3, text="Select a CSV file:").grid(row=self.fields, column=0, sticky='ew', columnspan=2, pady=(10, 0))
+        self.fields += 1
+
+        self.csv_files = ttk.Combobox(tab3, values=self.get_csv_files)
+        self.csv_files.grid(row=self.fields, column=0, columnspan=2)
+        self.csv_files.bind("<Button-1>", self.update_combobox())
+        self.fields += 1
+
+        tk.Button(tab3, text="Calculate All", command=self.calculate_cd_csv).grid(row=self.fields, column=0, columnspan=2)
+        self.fields += 1
+
+        tab3.rowconfigure(self.fields + 1, weight=1)
+        tab3.columnconfigure(1, weight=1)
 
     def create_input_field(self, parent, label_text, default_value):
         """
@@ -248,6 +276,70 @@ class App:
         except ValueError as e:
             messagebox.showerror("Invalid Input", str(e))
 
+    def calculate_cd(self):
+        v1 = float(self.fps_1_entry.get()) * 0.3048
+        x1 = float(self.dist_1_entry.get())
+        v2 = float(self.fps_2_entry.get()) * 0.3048
+        x2 = float(self.dist_2_entry.get())
+        m = float(self.mass_g_entry_2.get()) / 1000
+        Cd = self.reverse_sim(v1, x1, v2, x2, m)
+
+        self.cd_output.delete(0, tk.END)  # Clear the current value
+        self.cd_output.insert(0, f'{Cd:0.3f}')  # Insert the new value
+
+    def reverse_sim(self, v1, x1, v2, x2, m):
+        Cd_calc = 0.5
+        scale_factor = 100
+        mult = 5
+        for _ in range(100):
+            a = Sim(v=v1, Cd=Cd_calc, mass=m, x=x1)
+            a.run()
+            v_range = np.interp(x2, a.x, a.v)
+            scale_factor = 1 - mult * (v2 - v_range) / v2
+            print(f'{m}, {v1}, {v2} ,{v_range}, {scale_factor}, {Cd_calc}')
+            if abs(1 - scale_factor) < 0.001:
+                print('Converged!')
+                break
+            else:
+                Cd_calc = Cd_calc * scale_factor
+            mult = max(mult * 0.85, 1)
+        return Cd_calc
+
+    def calculate_cd_csv(self):
+        try:
+            fname = self.csv_files.get().rstrip('.csv')
+            with open(fname + '_proc.csv', 'w', newline='') as out:
+                writer = csv.writer(out)
+
+                with open(fname + '.csv', 'r') as f:
+                    reader = csv.reader(f)
+                    header = next(reader)
+                    header.append('Cd')
+                    writer.writerow(header)
+                    for row in reader:
+                        m = row[0]
+                        v1 = row[1]
+                        x1 = row[2]
+                        v2 = row[3]
+                        x2 = row[4]
+
+                        Cd = self.reverse_sim(float(v1) * 0.3048, float(x1), float(v2) * 0.3048, float(x2), float(m) / 1000)
+
+                        writer.writerow([m, v1, x1, v2, x2, Cd])
+
+            messagebox.showinfo("Simulation Complete", "The simulation has been completed successfully.")
+        except ValueError as e:
+            messagebox.showerror("Uh oh...!", str(e))
+
+    def update_combobox(self):
+        """Update the values in the combobox when it is clicked."""
+        self.csv_files['values'] = self.get_csv_files()
+
+    def get_csv_files(self):
+        """Get a list of all CSV files in the current working directory."""
+        csv_files = [file for file in os.listdir(os.getcwd()) if file.endswith('.csv')]
+        return csv_files
+
     def save_results(self):
         """
         Save the results of the simulations to files.
@@ -280,14 +372,9 @@ class App:
         """
 
         sim_id = [i for i, (_, metadata, _, _) in enumerate(self.simulations) if metadata["sim_id"] == index]
-        print(f'index: {index}, sim_id: {sim_id}')
 
         # Remove the simulation and its associated metadata and widgets
-        print(len(self.simulations))
         _, _, enable_checkbox, delete_button = self.simulations.pop(sim_id[0])
-        print(len(self.simulations))
-
-        #this doesn't seem to be working? Length is not reduced?
 
         # Destroy the Tkinter widgets
         enable_checkbox.destroy()
@@ -326,7 +413,6 @@ class App:
         """
         self.ax.clear()
         selected_sims = [i for i, en in enumerate(self.simulations) if en[1]["enabled"].get()]
-        print(f'{selected_sims}')
 
         if not selected_sims:
             self.canvas.draw()
