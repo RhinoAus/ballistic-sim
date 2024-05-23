@@ -197,7 +197,7 @@ class App:
 
         self.csv_files = ttk.Combobox(tab3, values=self.get_csv_files)
         self.csv_files.grid(row=self.fields, column=0, columnspan=2)
-        self.csv_files.bind("<Button-1>", self.update_combobox())
+        self.csv_files.bind("<Button-1>", self.update_combobox)
         self.fields += 1
 
         tk.Button(tab3, text="Calculate All", command=self.calculate_cd_csv).grid(row=self.fields, column=0, columnspan=2)
@@ -307,14 +307,15 @@ class App:
 
     def calculate_cd_csv(self):
         try:
-            fname = self.csv_files.get().rstrip('.csv')
-            with open(fname + '_proc.csv', 'w', newline='') as out:
-                writer = csv.writer(out)
-
-                with open(fname + '.csv', 'r') as f:
-                    reader = csv.reader(f)
-                    header = next(reader)
-                    header.append('Cd')
+            written = 0
+            fname = self.csv_files.get().removesuffix('.csv')
+            with open(fname + '.csv', 'r') as f:
+                reader = csv.reader(f)
+                header = next(reader)
+                header = header[0:5]
+                header.append('Cd')
+                with open(fname + '_proc.csv', 'w', newline='') as out:
+                    writer = csv.writer(out)
                     writer.writerow(header)
                     for row in reader:
                         m = row[0]
@@ -326,12 +327,19 @@ class App:
                         Cd = self.reverse_sim(float(v1) * 0.3048, float(x1), float(v2) * 0.3048, float(x2), float(m) / 1000)
 
                         writer.writerow([m, v1, x1, v2, x2, Cd])
+                        written += 1
 
-            messagebox.showinfo("Simulation Complete", "The simulation has been completed successfully.")
-        except ValueError as e:
-            messagebox.showerror("Uh oh...!", str(e))
+            if written > 1:
+                messagebox.showinfo("Reverse Simulations Complete", "The reverse simulations have been completed successfully.")
+            elif written == 1:
+                messagebox.showinfo("Reverse Simulation Complete", "The reverse simulation has been completed successfully.")
+            elif written == 0:
+                messagebox.showerror("Invalid Input", "No data was written to the CSV file.")
 
-    def update_combobox(self):
+        except Exception as e:
+            messagebox.showerror("Invalid Input", f'Something went wrong. {str(e)}')
+
+    def update_combobox(self, _):
         """Update the values in the combobox when it is clicked."""
         self.csv_files['values'] = self.get_csv_files()
 
