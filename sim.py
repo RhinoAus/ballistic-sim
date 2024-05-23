@@ -140,6 +140,18 @@ class App:
         self.simulations = []
         self.cursor = None
         self.fields = 0
+        self.colour_table = [
+            "#1f77b4",  # Blue
+            "#ff7f0e",  # Orange
+            "#2ca02c",  # Green
+            "#d62728",  # Red
+            "#9467bd",  # Purple
+            "#8c564b",  # Brown
+            "#e377c2",  # Pink
+            "#7f7f7f",  # Gray
+            "#bcbd22",  # Olive
+            "#17becf"   # Cyan
+        ]
 
         # Create tabs
         notebook = ttk.Notebook(root)
@@ -256,8 +268,9 @@ class App:
 
             messagebox.showinfo("Simulation Complete", "The simulation has been completed successfully.")
 
-            enable_checkbox = tk.Checkbutton(self.sim_select_frame, text="", variable=sim_metadata["enabled"], command=self.update_plot)
+            enable_checkbox = tk.Checkbutton(self.sim_select_frame, text="", variable=sim_metadata["enabled"], command=self.update_plot, bg=self.colour_table[sim_metadata["sim_id"] % len(self.colour_table)])
             enable_checkbox.grid(row=len(self.simulations), column=0, sticky='w')
+
             if ke > 0:
                 sim_metadata["label_text"] = f"Simulation {sim_metadata['sim_id']+1}: {sim_metadata['ke']} J @ {sim_metadata['measured_at']} m, m={sim_metadata['mass']*1000} g, Cd={sim_metadata['Cd']:0.3f}"
                 enable_checkbox.config(text=sim_metadata["label_text"])
@@ -368,9 +381,18 @@ class App:
         """
         plot_frame = ttk.LabelFrame(parent, text="Plot Area")
         plot_frame.grid(row=0, column=1, rowspan=6, padx=10, pady=10, sticky='nsew')
+
+        # Configure the grid to make the plot area expand
+        plot_frame.rowconfigure(0, weight=1)
+        plot_frame.columnconfigure(0, weight=1)
+
         self.figure, self.ax = plt.subplots()
         self.canvas = FigureCanvasTkAgg(self.figure, master=plot_frame)
-        self.canvas.get_tk_widget().pack(expand=True, fill='both')
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
+
+        # Make the canvas expand and fill the available space
+        plot_frame.grid_rowconfigure(0, weight=1)
+        plot_frame.grid_columnconfigure(0, weight=1)
 
     def delete_simulation(self, index):
         """
@@ -429,7 +451,7 @@ class App:
         base_sim = self.simulations[selected_sims[0]][0] if self.scale_var.get() else None
 
         for i in selected_sims:
-            (sim, _, _, _) = self.simulations[i]
+            (sim, metadata, _, _) = self.simulations[i]
             if self.plot_type.get() == "velocity":
                 y_data = sim.v
                 if self.scale_var.get() and base_sim:
@@ -460,8 +482,7 @@ class App:
                     y_label = "Time (%)"
                 else:
                     y_label = "Time (T)"
-
-            self.ax.plot(sim.x, y_data, label=f"{self.simulations[i][1]['label_text']}")
+            self.ax.plot(sim.x, y_data, label=f"{self.simulations[i][1]['label_text']}", color=self.colour_table[metadata["sim_id"] % len(self.colour_table)])
 
         self.ax.set_title(f"{y_label} vs. Distance")
         self.ax.set_xlabel("Distance (m)")
