@@ -6,10 +6,11 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import mplcursors
 import os
 import csv
+import json
 
 
 class Sim:
-    def __init__(self, v=100, x=0, zero_range=10, y0=1.5, rho=1.225, Cd=0.465, radius=0.006, mass=0.001, g=-9.81, time_step=0.0001, time_max=2):
+    def __init__(self, v=100, x=0, zero_range=0, y0=1.5, rho=1.225, Cd=0.465, radius=0.006, mass=0.001, g=-9.81, time_step=0.0001, time_max=2):
         """
         Initialize the simulation parameters.
 
@@ -120,14 +121,6 @@ class Sim:
         v_measured = np.interp(x, self.x, self.v)
         self.v0 *= v / v_measured
 
-    def save_to_file(self, filename):
-        """
-        Save the simulation data to a file.
-
-        :param filename: Name of the file to save the data
-        """
-        np.savetxt(filename, np.c_[self.time, self.x, self.y, self.vx, self.vy, self.ax, self.ay])
-
 
 class App:
     def __init__(self, root):
@@ -174,6 +167,9 @@ class App:
         self.fields += 1
         tk.Button(tab1, text="Save Results", command=self.save_results).grid(row=self.fields, column=0, columnspan=2)
         self.fields += 1
+        tk.Button(tab1, text="Load Results", command=self.load_results).grid(row=self.fields, column=0, columnspan=2)
+        self.fields += 1
+        # to do: add load results file button
 
         tab1.rowconfigure(self.fields + 1, weight=1)
         tab1.columnconfigure(1, weight=1)
@@ -305,7 +301,7 @@ class App:
         scale_factor = 100
         mult = 5
         for _ in range(100):
-            a = Sim(v=v1, Cd=Cd_calc, mass=m, x=x1)
+            a = Sim(v=v1, Cd=Cd_calc, mass=m, x=x1, zero_range=x2)
             a.run()
             v_range = np.interp(x2, a.x, a.v)
             scale_factor = 1 - mult * (v2 - v_range) / v2
@@ -365,13 +361,72 @@ class App:
         """
         Save the results of the simulations to files.
         """
+        # to do: add some sort of compression?
         if self.simulations:
-            for i, (sim, _, _, _) in enumerate(self.simulations):
-                filename = f"simulation_results_{i + 1}.txt"
-                sim.save_to_file(filename)
+            for _, (sim, metadata, _, _) in enumerate(self.simulations):
+                filename = f"simulation_results_{metadata['sim_id']}.txt"
+                with open(filename, 'w') as f:
+                    write_metadata = dict(metadata)
+                    write_metadata['enabled'] = write_metadata['enabled'].get()
+                    f.write(json.dumps(write_metadata) + '\n')
+                    np.savetxt(f, np.c_[sim.time, sim.x, sim.y, sim.vx, sim.vy, sim.ax, sim.ay, sim.x_flat, sim.y_flat])
             messagebox.showinfo("Save Complete", "The simulation results have been saved.")
         else:
             messagebox.showwarning("No Simulation", "Please run the simulation first.")
+
+    def load_results(self):
+        """
+        Load all saved results into the GUI
+        """
+        try:
+            save_file_name = [file for file in os.listdir(os.getcwd()) if file.endswith('.txt')]
+            for filename in save_file_name:
+                with open(filename, 'r') as f:
+                    sim_metadata = json.loads(f.readline())
+                    sim_metadata["sim_id"] = self.sim_id
+                    sim_metadata['enabled'] = tk.BooleanVar(value=True)
+                    self.sim_id += 1
+
+                    data = np.loadtxt(f)
+                    sim = Sim()
+                    sim.time = data[:, 0]
+                    sim.x = data[:, 1]
+                    sim.y = data[:, 2]
+                    sim.vx = data[:, 3]
+                    sim.vy = data[:, 4]
+                    sim.ax = data[:, 5]
+                    sim.ay = data[:, 6]
+                    sim.x_flat = data[:, 7]
+                    sim.y_flat = data[:, 8]
+
+                    sim.mass = sim_metadata['mass']
+
+                    sim.v = np.sqrt(sim.vx ** 2 + sim.vy ** 2)
+                    sim.ke = 0.5 * sim.mass * sim.v ** 2
+
+                    # to do: refactor this whole mess so that a sim result is a class
+
+                    enable_checkbox = tk.Checkbutton(self.sim_select_frame, text="", variable=sim_metadata["enabled"], command=self.update_plot, bg=self.colour_table[(sim_metadata["sim_id"] - 1) % len(self.colour_table)])
+                    enable_checkbox.grid(row=len(self.simulations), column=0, sticky='w')
+
+                    if sim_metadata['ke'] > 0:
+                        sim_metadata["label_text"] = f"Simulation {sim_metadata['sim_id']}: {sim_metadata['ke']} J @ {sim_metadata['measured_at']} m, m={sim_metadata['mass']*1000} g, Cd={sim_metadata['Cd']:0.3f}"
+                        enable_checkbox.config(text=sim_metadata["label_text"])
+                    else:
+                        sim_metadata["label_text"] = f"Simulation {sim_metadata['sim_id']}: {sim_metadata['velocity']/0.3048} ft/s @ {sim_metadata['measured_at']} m, m={sim_metadata['mass']*1000} g, Cd={sim_metadata['Cd']:0.3f}"
+                        enable_checkbox.config(text=sim_metadata["label_text"])
+
+                    delete_button = tk.Button(self.sim_select_frame, text="Delete", command=lambda: self.delete_simulation(sim_metadata["sim_id"]))
+                    delete_button.grid(row=len(self.simulations), column=1, padx=5, pady=2)
+
+                    self.simulations.append((sim, sim_metadata, enable_checkbox, delete_button))
+
+            messagebox.showinfo("Load Complete", "The simulation results have been loaded.")
+
+        except ValueError as e:
+            messagebox.showwarning("No Simulation", e)
+
+        self.update_plot()
 
     def create_plot_area(self, parent):
         """
