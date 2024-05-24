@@ -366,7 +366,7 @@ class App:
         Save the results of the simulations to files.
         """
         if self.simulations:
-            for i, (sim, _) in enumerate(self.simulations):
+            for i, (sim, _, _, _) in enumerate(self.simulations):
                 filename = f"simulation_results_{i + 1}.txt"
                 sim.save_to_file(filename)
             messagebox.showinfo("Save Complete", "The simulation results have been saved.")
