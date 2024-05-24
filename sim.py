@@ -44,15 +44,15 @@ class Sim:
         self.ax = np.zeros(self.iterations)
         self.ay = np.zeros(self.iterations)
 
-        # Zero the shot
-        if zero_range > 0:
-            for _ in range(3):
-                self.update_zero(zero_range)
-
         # Update the muzzle velocity if not measured at the muzzle
         if x > 0:
             for _ in range(3):
                 self.update_v0(v, x)
+
+        # Zero the shot
+        if zero_range > 0:
+            for _ in range(3):
+                self.update_zero(zero_range)
 
     def run(self, theta=None):
         """
@@ -169,7 +169,7 @@ class App:
         self.mass_g_entry = self.create_input_field(tab1, "Mass (g):", 1.0)
         self.drag_coefficient_entry = self.create_input_field(tab1, "Drag Coefficient:", 0.465)
         self.zero_distance_entry = self.create_input_field(tab1, "Zero Distance (m):", 10)
-        self.sim_id = 0
+        self.sim_id = 1
         tk.Button(tab1, text="Run Simulation", command=self.run_simulation).grid(row=self.fields, column=0, columnspan=2)
         self.fields += 1
         tk.Button(tab1, text="Save Results", command=self.save_results).grid(row=self.fields, column=0, columnspan=2)
@@ -265,17 +265,18 @@ class App:
                 "measured_at": x,
                 "label_text": ""
             }
+            self.sim_id += 1
 
             messagebox.showinfo("Simulation Complete", "The simulation has been completed successfully.")
 
-            enable_checkbox = tk.Checkbutton(self.sim_select_frame, text="", variable=sim_metadata["enabled"], command=self.update_plot, bg=self.colour_table[sim_metadata["sim_id"] % len(self.colour_table)])
+            enable_checkbox = tk.Checkbutton(self.sim_select_frame, text="", variable=sim_metadata["enabled"], command=self.update_plot, bg=self.colour_table[(sim_metadata["sim_id"] - 1) % len(self.colour_table)])
             enable_checkbox.grid(row=len(self.simulations), column=0, sticky='w')
 
             if ke > 0:
-                sim_metadata["label_text"] = f"Simulation {sim_metadata['sim_id']+1}: {sim_metadata['ke']} J @ {sim_metadata['measured_at']} m, m={sim_metadata['mass']*1000} g, Cd={sim_metadata['Cd']:0.3f}"
+                sim_metadata["label_text"] = f"Simulation {sim_metadata['sim_id']}: {sim_metadata['ke']} J @ {sim_metadata['measured_at']} m, m={sim_metadata['mass']*1000} g, Cd={sim_metadata['Cd']:0.3f}"
                 enable_checkbox.config(text=sim_metadata["label_text"])
             else:
-                sim_metadata["label_text"] = f"Simulation {sim_metadata['sim_id']+1}: {sim_metadata['velocity']/0.3048} ft/s @ {sim_metadata['measured_at']} m, m={sim_metadata['mass']*1000} g, Cd={sim_metadata['Cd']:0.3f}"
+                sim_metadata["label_text"] = f"Simulation {sim_metadata['sim_id']}: {sim_metadata['velocity']/0.3048} ft/s @ {sim_metadata['measured_at']} m, m={sim_metadata['mass']*1000} g, Cd={sim_metadata['Cd']:0.3f}"
                 enable_checkbox.config(text=sim_metadata["label_text"])
 
             delete_button = tk.Button(self.sim_select_frame, text="Delete", command=lambda: self.delete_simulation(sim_metadata["sim_id"]))
@@ -284,7 +285,6 @@ class App:
             self.simulations.append((simulation, sim_metadata, enable_checkbox, delete_button))
 
             self.update_plot()
-            self.sim_id += 1
 
         except ValueError as e:
             messagebox.showerror("Invalid Input", str(e))
@@ -435,20 +435,40 @@ class App:
         tk.Radiobutton(plot_options_frame, text="Time", variable=self.plot_type, value="time", command=self.update_plot).pack(anchor='w', padx=5, pady=2)
 
         self.scale_var = tk.BooleanVar()
-        tk.Checkbutton(plot_options_frame, text="Scale as % of Sim 1", variable=self.scale_var, command=self.update_plot).pack(anchor='w', padx=5, pady=2)
+        self.scale_var.trace_add('write', self.update_scale_combobox)
+        tk.Checkbutton(plot_options_frame, text="Scale as % of Sim:", variable=self.scale_var, command=self.update_plot).pack(anchor='w', padx=5, pady=2)
 
-    def update_plot(self):
+        self.scale_sim = ttk.Combobox(plot_options_frame, values=self.get_sim_names(), state='disabled')
+        self.scale_sim.pack(anchor='w', padx=5, pady=2)
+        self.scale_sim.bind("<Button-1>", self.update_scale_combobox)
+        self.scale_sim.bind("<<ComboboxSelected>>", self.update_plot)
+
+        self.marker_var = tk.BooleanVar()
+        tk.Checkbutton(plot_options_frame, text="Set Point Markers", variable=self.marker_var, command=self.update_plot).pack(anchor='w', padx=5, pady=2)
+
+        self.y_height_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(plot_options_frame, text="Limit Y Plot Height", variable=self.y_height_var, command=self.update_plot).pack(anchor='w', padx=5, pady=2)
+
+    def update_scale_combobox(self, *args, **kwargs):
+        self.scale_sim.config(state='normal' if self.scale_var.get() else 'disabled')
+        self.scale_sim['values'] = self.get_sim_names()
+        self.scale_sim.set(self.scale_sim['values'][0])
+
+    def get_sim_names(self):
+        return [f'Simulation {metadata["sim_id"]}' for (_, metadata, _, _) in self.simulations if metadata["enabled"].get()]
+
+    def update_plot(self, *args, **kwargs):
         """
         Update the plot based on the selected simulations and plot options.
         """
         self.ax.clear()
-        selected_sims = [i for i, en in enumerate(self.simulations) if en[1]["enabled"].get()]
+        selected_sims = [i for i, (_, metadata, _, _) in enumerate(self.simulations) if metadata["enabled"].get()]
 
         if not selected_sims:
             self.canvas.draw()
             return
 
-        base_sim = self.simulations[selected_sims[0]][0] if self.scale_var.get() else None
+        base_sim = [sim for (sim, metadata, _, _) in self.simulations if metadata["sim_id"] == int(self.scale_sim.get().removeprefix('Simulation '))][0] if self.scale_var.get() else None
 
         for i in selected_sims:
             (sim, metadata, _, _) = self.simulations[i]
@@ -482,7 +502,13 @@ class App:
                     y_label = "Time (%)"
                 else:
                     y_label = "Time (T)"
-            self.ax.plot(sim.x, y_data, label=f"{self.simulations[i][1]['label_text']}", color=self.colour_table[metadata["sim_id"] % len(self.colour_table)])
+
+            self.ax.plot(sim.x, y_data, label=f"{self.simulations[i][1]['label_text']}", color=self.colour_table[(metadata["sim_id"] - 1) % len(self.colour_table)])
+            if self.marker_var.get():
+                self.ax.plot(metadata["measured_at"], np.interp(metadata["measured_at"], sim.x, y_data), color=self.colour_table[(metadata["sim_id"] - 1) % len(self.colour_table)], marker='o', markersize=5)
+
+            if self.plot_type.get() == "y" and self.y_height_var.get() and not self.scale_var.get():
+                self.ax.set_ylim(0, 2)
 
         self.ax.set_title(f"{y_label} vs. Distance")
         self.ax.set_xlabel("Distance (m)")
