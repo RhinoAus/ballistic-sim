@@ -451,8 +451,14 @@ class App:
 
     def update_scale_combobox(self, *args, **kwargs):
         self.scale_sim.config(state='normal' if self.scale_var.get() else 'disabled')
+        old_value = self.scale_sim.get()
         self.scale_sim['values'] = self.get_sim_names()
-        self.scale_sim.set(self.scale_sim['values'][0])
+        if old_value in self.scale_sim['values']:
+            self.scale_sim.set(old_value)
+        elif self.scale_sim['values'] != '':
+            self.scale_sim.set(self.scale_sim['values'][0])
+        else:
+            self.scale_sim.set('')
 
     def get_sim_names(self):
         return [f'Simulation {metadata["sim_id"]}' for (_, metadata, _, _) in self.simulations if metadata["enabled"].get()]
@@ -461,6 +467,7 @@ class App:
         """
         Update the plot based on the selected simulations and plot options.
         """
+        self.update_scale_combobox()
         self.ax.clear()
         selected_sims = [i for i, (_, metadata, _, _) in enumerate(self.simulations) if metadata["enabled"].get()]
 
